@@ -21,8 +21,10 @@ def load_path_from_csv(file_path):
     path = []
     with open(file_path, "r") as f:
         reader = csv.reader(f)
-        next(reader)
         for row in reader:
+            # Skip metadata and header
+            if not row or row[0].startswith("#") or row[0] == "x":
+                continue
             path.append((float(row[0]), float(row[1])))
     return path
 
