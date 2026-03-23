@@ -3,6 +3,7 @@ import os
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
+import textwrap  # <-- ONLY added for formatting
 
 # ==================================================
 # DYNAMIC FIELD INPUT
@@ -242,7 +243,6 @@ for idx,pos in enumerate(row_positions):
     plt.text(-2,pos,f"Row {idx+1}",
              ha="right",va="center",fontsize=9)
 
-# Diagonal Entrance Colored
 plt.plot(diag_x, diag_y,
          color="#9467bd",linewidth=4,label="Diagonal Entrance")
 
@@ -272,8 +272,37 @@ plt.scatter(xs[-1],ys[-1],
             marker="X",s=200,
             edgecolors="black",
             label="END")
+# ==================================================
+# TITLE (TOP - OUTSIDE GRAPH)
+# ==================================================
+plt.figtext(
+    0.5, 0.98,
+    "Professional Tractor Path Planning: 30° Arc Headland Turns",
+    ha='center',
+    va='top',
+    fontsize=16,
+    fontweight='bold',
+    color='darkgreen'
+)
 
-plt.title("Professional Tractor Path Planning: 30° Arc Headland Turns")
+# ==================================================
+# ROW SEQUENCE (BELOW TITLE)
+# ==================================================
+sequence_text = "Row Sequence: " + " → ".join(str(i+1) for i in visit_order)
+wrapped_text = "\n".join(textwrap.wrap(sequence_text, width=80))
+
+plt.figtext(
+    0.5, 0.94,   # below title
+    wrapped_text,
+    ha='center',
+    va='top',
+    fontsize=11,
+    fontweight='bold',
+    color='darkblue'
+)
+# Adjust layout for spacing
+plt.subplots_adjust(top=0.80)
+
 plt.xlabel("Length (meters)")
 plt.ylabel("Width (meters)")
 
