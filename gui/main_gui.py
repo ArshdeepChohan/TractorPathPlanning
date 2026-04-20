@@ -5,7 +5,9 @@ import os
 import sys
 import csv
 import math
+import json
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # ==================================================
@@ -53,7 +55,7 @@ class FieldBoundaryGUI:
         root.configure(bg=BG_COLOR)
 
         tk.Label(root,
-                 text="🌍 Field GPS Input (Rectangle)",
+                 text="🌍 Field Shape + GPS Input",
                  font=FONT_HEADER,
                  fg=HEADER_COLOR,
                  bg=BG_COLOR).pack(pady=30)
@@ -61,28 +63,47 @@ class FieldBoundaryGUI:
         frame = tk.Frame(root, bg=BG_COLOR)
         frame.pack(pady=20)
 
-        labels = [
-            "Point A Latitude", "Point A Longitude",
-            "Point B Latitude", "Point B Longitude",
-            "Point C Latitude", "Point C Longitude",
-            "Point D Latitude", "Point D Longitude"
-        ]
+        tk.Label(frame, text="Field Shape", font=FONT_LABEL, bg=BG_COLOR).grid(row=0, column=0, pady=8)
+        self.shape_var = tk.StringVar(value="rectangle")
+        shape_menu = tk.OptionMenu(frame, self.shape_var, "rectangle", "square", "trapezium", "triangle", "rhombus")
+        shape_menu.config(font=FONT_LABEL, width=22)
+        shape_menu.grid(row=0, column=1, pady=8)
+        self.shape_var.trace_add("write", lambda *_: self.render_point_entries())
 
+        self.points_frame = tk.Frame(frame, bg=BG_COLOR)
+        self.points_frame.grid(row=1, column=0, columnspan=2)
         self.entries = []
-
-        for i, text in enumerate(labels):
-            tk.Label(frame,
-                     text=text,
-                     font=FONT_LABEL,
-                     bg=BG_COLOR).grid(row=i, column=0, pady=8)
-
-            entry = tk.Entry(frame, font=FONT_LABEL, width=25)
-            entry.grid(row=i, column=1)
-            self.entries.append(entry)
+        self.render_point_entries()
 
         styled_button(root,
                       "Generate Field ➜",
                       self.generate_field).pack(pady=40)
+
+    def required_points(self):
+        shape_counts = {
+            "triangle": 3,
+            "rectangle": 4,
+            "square": 4,
+            "trapezium": 4,
+            "rhombus": 4,
+        }
+        return shape_counts.get(self.shape_var.get(), 4)
+
+    def render_point_entries(self):
+        for widget in self.points_frame.winfo_children():
+            widget.destroy()
+        self.entries = []
+        count = self.required_points()
+        for idx in range(count):
+            label_lat = f"Point {chr(ord('A') + idx)} Latitude"
+            label_lon = f"Point {chr(ord('A') + idx)} Longitude"
+            tk.Label(self.points_frame, text=label_lat, font=FONT_LABEL, bg=BG_COLOR).grid(row=idx * 2, column=0, pady=4)
+            entry_lat = tk.Entry(self.points_frame, font=FONT_LABEL, width=25)
+            entry_lat.grid(row=idx * 2, column=1, pady=4)
+            tk.Label(self.points_frame, text=label_lon, font=FONT_LABEL, bg=BG_COLOR).grid(row=idx * 2 + 1, column=0, pady=4)
+            entry_lon = tk.Entry(self.points_frame, font=FONT_LABEL, width=25)
+            entry_lon.grid(row=idx * 2 + 1, column=1, pady=4)
+            self.entries.extend([entry_lat, entry_lon])
 
     def generate_field(self):
 
@@ -101,10 +122,9 @@ class FieldBoundaryGUI:
                 messagebox.showerror("Error", f"Invalid number:\n{val}")
                 return
 
-        A = (values[0], values[1])
-        B = (values[2], values[3])
-        C = (values[4], values[5])
-        D = (values[6], values[7])
+        points = []
+        for i in range(0, len(values), 2):
+            points.append((values[i], values[i + 1]))
 
         def distance(p1, p2):
             lat1, lon1 = p1
@@ -114,22 +134,26 @@ class FieldBoundaryGUI:
             dlon = (lon2 - lon1) * 111320 * math.cos(avg_lat)
             return math.sqrt(dlat**2 + dlon**2)
 
+        A, B = points[0], points[1]
+        C = points[2]
         L = distance(A, B)
         W = distance(B, C)
+        shape = self.shape_var.get()
 
         messagebox.showinfo(
             "Field Size",
-            f"Length ≈ {L:.2f} meters\nWidth ≈ {W:.2f} meters"
+            f"Shape: {shape.title()}\nLength ≈ {L:.2f} meters\nWidth ≈ {W:.2f} meters"
         )
-
-        BoundaryScreen(self.root, L, W)
+        BoundaryScreen(self.root, L, W, shape, points)
 
 # ==================================================
 # FIELD BOUNDARY VIEW
 # ==================================================
 class BoundaryScreen:
-    def __init__(self, parent, L, W):
+    def __init__(self, parent, L, W, shape, gps_points):
         self.win = tk.Toplevel(parent)
+        self.shape = shape
+        self.gps_points = gps_points
         self.win.title("Field Boundary")
         self.win.state("zoomed")
         self.win.configure(bg=BG_COLOR)
@@ -140,9 +164,17 @@ class BoundaryScreen:
                  fg=HEADER_COLOR).pack(pady=20)
 
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot([0, L, L, 0, 0], [0, 0, W, W, 0], 'g', linewidth=3)
-        ax.set_xlim(0, L)
-        ax.set_ylim(0, W)
+        if shape == "rectangle":
+            ax.plot([0, L, L, 0, 0], [0, 0, W, W, 0], 'g', linewidth=3)
+            ax.set_xlim(0, L)
+            ax.set_ylim(0, W)
+        else:
+            local_points = self._gps_to_local(gps_points)
+            poly_x = [p[0] for p in local_points] + [local_points[0][0]]
+            poly_y = [p[1] for p in local_points] + [local_points[0][1]]
+            ax.plot(poly_x, poly_y, 'g', linewidth=3)
+            ax.set_xlim(min(poly_x) - 2, max(poly_x) + 2)
+            ax.set_ylim(min(poly_y) - 2, max(poly_y) + 2)
         ax.axis("equal")
         ax.grid(True)
 
@@ -155,16 +187,28 @@ class BoundaryScreen:
 
         styled_button(btn, "⬅ Back", self.win.destroy).grid(row=0, column=0, padx=20)
         styled_button(btn, "Next ➜",
-                      lambda: BaselineGUI(parent, L, W)).grid(row=0, column=1, padx=20)
+                      lambda: BaselineGUI(parent, L, W, self.shape, self.gps_points)).grid(row=0, column=1, padx=20)
+
+    def _gps_to_local(self, points):
+        lat0, lon0 = points[0]
+        local = []
+        for lat, lon in points:
+            avg_lat = math.radians((lat0 + lat) / 2.0)
+            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
+            y = (lat - lat0) * 111320.0
+            local.append((x, y))
+        return local
 
 # ==================================================
 # DASHBOARD 2 : BASELINE CONFIG
 # ==================================================
 class BaselineGUI:
-    def __init__(self, root, L, W):
+    def __init__(self, root, L, W, shape="rectangle", gps_points=None):
         self.root = root
         self.L = L
         self.W = W
+        self.shape = shape
+        self.gps_points = gps_points or []
 
         self.win = tk.Toplevel(root)
         self.win.title("Baseline Configuration")
@@ -222,13 +266,17 @@ class BaselineGUI:
                            self.W,
                            base_len,
                            diag,
-                           self.direction.get())
+                           self.direction.get(),
+                           self.shape,
+                           self.gps_points)
 
 # ==================================================
 # BASELINE PREVIEW
 # ==================================================
 class BaselinePreviewGUI:
-    def __init__(self, root, L, W, base_len, diag, direction):
+    def __init__(self, root, L, W, base_len, diag, direction, shape="rectangle", gps_points=None):
+        self.shape = shape
+        self.gps_points = gps_points or []
 
         self.win = tk.Toplevel(root)
         self.win.title("Baseline + Diagonal Preview")
@@ -242,7 +290,13 @@ class BaselinePreviewGUI:
 
         fig, ax = plt.subplots(figsize=(10, 5))
 
-        ax.plot([0, L, L, 0, 0], [0, 0, W, W, 0], 'black')
+        if self.shape == "rectangle":
+            ax.plot([0, L, L, 0, 0], [0, 0, W, W, 0], 'black')
+        else:
+            local_points = self._gps_to_local(self.gps_points)
+            bx = [p[0] for p in local_points] + [local_points[0][0]]
+            by = [p[1] for p in local_points] + [local_points[0][1]]
+            ax.plot(bx, by, 'black')
         ax.plot([0, diag], [0, diag], 'blue', linewidth=3)
 
         if direction == "lengthwise":
@@ -264,19 +318,31 @@ class BaselinePreviewGUI:
 
         styled_button(btn, "⬅ Back", self.win.destroy).grid(row=0, column=0, padx=20)
         styled_button(btn, "Next ➜",
-                      lambda: RowSpacingGUI(root, L, W, direction, base_len, diag)).grid(row=0, column=1, padx=20)
+                      lambda: RowSpacingGUI(root, L, W, direction, base_len, diag, self.shape, self.gps_points)).grid(row=0, column=1, padx=20)
+
+    def _gps_to_local(self, points):
+        lat0, lon0 = points[0]
+        local = []
+        for lat, lon in points:
+            avg_lat = math.radians((lat0 + lat) / 2.0)
+            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
+            y = (lat - lat0) * 111320.0
+            local.append((x, y))
+        return local
 
 # ==================================================
 # DASHBOARD 3 : ROW SPACING
 # ==================================================
 class RowSpacingGUI:
-    def __init__(self, root, L, W, direction, base_len, diag):
+    def __init__(self, root, L, W, direction, base_len, diag, shape="rectangle", gps_points=None):
         self.root = root
         self.L = L
         self.W = W
         self.direction = direction
         self.base_len = base_len
         self.diag = diag
+        self.shape = shape
+        self.gps_points = gps_points or []
 
         self.win = tk.Toplevel(root)
         self.win.title("Row Spacing")
@@ -291,6 +357,11 @@ class RowSpacingGUI:
         self.row_entry = tk.Entry(self.win, font=FONT_LABEL)
         self.row_entry.pack(pady=20)
 
+        tk.Label(self.win, text="Turning Radius (m)", font=FONT_LABEL, bg=BG_COLOR).pack(pady=10)
+        self.turn_entry = tk.Entry(self.win, font=FONT_LABEL)
+        self.turn_entry.insert(0, "4.0")
+        self.turn_entry.pack(pady=5)
+
         btn = tk.Frame(self.win, bg=BG_COLOR)
         btn.pack(pady=30)
 
@@ -300,27 +371,45 @@ class RowSpacingGUI:
     def generate(self):
         try:
             ROW = float(self.row_entry.get())
+            turn_radius = float(self.turn_entry.get())
         except:
-            messagebox.showerror("Error", "Enter valid row spacing")
+            messagebox.showerror("Error", "Enter valid row spacing and turning radius")
             return
 
         script_path = os.path.join(SRC_DIR, "path_generator.py")
 
-        subprocess.run(
-            [sys.executable, script_path,
-             str(self.L), str(self.W),
-             str(ROW), self.direction,
-             str(self.base_len), str(self.diag)],
-            check=True
-        )
+        cmd = [
+            sys.executable, script_path,
+            str(self.L), str(self.W),
+            str(ROW), self.direction,
+            str(self.base_len), str(self.diag),
+            "--shape", self.shape,
+            "--turn-radius", str(turn_radius),
+            "--export-json",
+        ]
+        if self.shape != "rectangle" and self.gps_points:
+            local_points = self._gps_to_local(self.gps_points)
+            cmd.extend(["--polygon-json", json.dumps(local_points)])
 
-        FinalPlotScreen(self.root, self.L, self.W, ROW, self.direction, self.base_len, self.diag)
+        subprocess.run(cmd, check=True)
+
+        FinalPlotScreen(self.root, self.L, self.W, ROW, self.direction, self.base_len, self.diag, self.shape, self.gps_points)
+
+    def _gps_to_local(self, points):
+        lat0, lon0 = points[0]
+        local = []
+        for lat, lon in points:
+            avg_lat = math.radians((lat0 + lat) / 2.0)
+            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
+            y = (lat - lat0) * 111320.0
+            local.append((x, y))
+        return local
 
 # ==================================================
 # FINAL SCREEN
 # ==================================================
 class FinalPlotScreen:
-    def __init__(self, parent, L, W, ROW, direction, base_len, diag):
+    def __init__(self, parent, L, W, ROW, direction, base_len, diag, shape="rectangle", gps_points=None):
 
         self.parent = parent
         self.L = L
@@ -329,6 +418,8 @@ class FinalPlotScreen:
         self.direction = direction
         self.base_len = base_len
         self.diag = diag
+        self.shape = shape
+        self.gps_points = gps_points or []
         self.win = tk.Toplevel(parent)
         self.win.title("Complete Field Path")
         self.win.state("zoomed")
@@ -336,9 +427,15 @@ class FinalPlotScreen:
         csv_path = os.path.join(DATA_DIR, "waypoints.csv")
 
         waypoints = []
+        metadata = {}
         with open(csv_path) as f:
             reader = csv.reader(f)
             for row in reader:
+                if row and row[0].startswith("#") and len(row) >= 7:
+                    try:
+                        metadata = json.loads(row[6])
+                    except Exception:
+                        metadata = {}
                 if not row or row[0].startswith("#") or row[0] == "x":
                     continue
                 waypoints.append({'x': float(row[0]), 'y': float(row[1]), 'type': int(row[2])})
@@ -351,8 +448,16 @@ class FinalPlotScreen:
 
         fig, ax = plt.subplots(figsize=(12, 6))
         
-        # 1. Plot Field Boundary (Dashed rectangle)
-        ax.plot([0, L, L, 0, 0], [0, 0, W, W, 0], "k--", linewidth=2, label="Field Boundary")
+        # 1. Plot Field Boundary
+        polygon = metadata.get("polygon")
+        if polygon:
+            bx = [p[0] for p in polygon] + [polygon[0][0]]
+            by = [p[1] for p in polygon] + [polygon[0][1]]
+            ax.plot(bx, by, "k--", linewidth=2, label="Field Boundary")
+        else:
+            bx = [0, L, L, 0, 0]
+            by = [0, 0, W, W, 0]
+            ax.plot(bx, by, "k--", linewidth=2, label="Field Boundary")
 
         # Plot Diagonal and Baseline for visual reference
         if direction == "lengthwise":
@@ -370,16 +475,24 @@ class FinalPlotScreen:
             row_positions = [diag + i * ROW for i in range(rows_count) if (diag + i * ROW) <= W]
             for idx, pos in enumerate(row_positions):
                 label = "Planned Crop Rows" if idx == 0 else ""
-                ax.plot([0, L], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
-                ax.text(-0.02 * L, pos, f"Row {idx + 1}", ha="right", va="center", fontsize=9)
-        else: # widthwise
+                if polygon:
+                    xs_intersections = self._line_polygon_intersections(polygon, pos, "lengthwise")
+                    if len(xs_intersections) >= 2:
+                        ax.plot([xs_intersections[0], xs_intersections[-1]], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                else:
+                    ax.plot([0, L], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+        else:
             available_length = L - diag
             rows_count = max(2, int(math.floor(available_length / ROW)) + 1)
             row_positions = [diag + i * ROW for i in range(rows_count) if (diag + i * ROW) <= L]
             for idx, pos in enumerate(row_positions):
                 label = "Planned Crop Rows" if idx == 0 else ""
-                ax.plot([pos, pos], [0, W], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
-                ax.text(pos, -0.02 * W, f"Row {idx + 1}", ha="center", va="top", fontsize=9)
+                if polygon:
+                    ys_intersections = self._line_polygon_intersections(polygon, pos, "widthwise")
+                    if len(ys_intersections) >= 2:
+                        ax.plot([pos, pos], [ys_intersections[0], ys_intersections[-1]], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                else:
+                    ax.plot([pos, pos], [0, W],color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
 
         # 3. Plot Tractor Travel Path (Differentiated by type)
         # We need to split waypoints into segments for coloring
@@ -403,8 +516,9 @@ class FinalPlotScreen:
                 # Avoid duplicate labels in legend
                 if any(l.get_label() == label for l in ax.get_lines()):
                     label = ""
-                ax.plot(current_segment_xs, current_segment_ys, color=color, linewidth=3, label=label, zorder=3)
-                
+                ax.plot(current_segment_xs, current_segment_ys,
+                        color=color, linewidth=3, label=label, zorder=3)
+             
                 # Start new segment (include last point of previous for continuity)
                 current_segment_xs = [current_segment_xs[-1], wp['x']]
                 current_segment_ys = [current_segment_ys[-1], wp['y']]
@@ -422,9 +536,14 @@ class FinalPlotScreen:
             label = ""
         ax.plot(current_segment_xs, current_segment_ys, color=color, linewidth=3, label=label, zorder=3)
 
+        
         # 4. GPS Waypoints (Clear markers)
         xs = [wp['x'] for wp in waypoints]
         ys = [wp['y'] for wp in waypoints]
+        # Keep legacy widthwise swap for rectangle mode only.
+        if direction == "widthwise" and not polygon:
+            xs, ys = ys, xs
+
         ax.scatter(xs[::5], ys[::5], color="black", s=15, zorder=4, label="GPS Waypoints")
 
         # 5. Start and End Positions (Distinct Markers)
@@ -442,6 +561,65 @@ class FinalPlotScreen:
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+                # ==================================================
+        # 🚜 TRACTOR ANIMATION (FIXED + WORKING)
+        # ==================================================
+
+        # Use marker instead of emoji (reliable)
+        tractor, = ax.plot(xs[0], ys[0],
+                           marker="s",
+                           markersize=10,
+                           color="green",
+                           zorder=6)
+
+        # Trail line
+        trail_line, = ax.plot([], [], color="orange", linewidth=2, zorder=5)
+
+        def init_anim():
+            tractor.set_data([xs[0]], [ys[0]])
+            trail_line.set_data([], [])
+            return tractor, trail_line
+
+        def update_anim(frame):
+            x = xs[frame]
+            y = ys[frame]
+
+            tractor.set_data([x], [y])
+            trail_line.set_data(xs[:frame], ys[:frame])
+
+            return tractor, trail_line
+
+
+        # ✅ FIXED: OUTSIDE function
+        self.ani = FuncAnimation(
+            fig,
+            update_anim,
+            frames=len(xs),
+            init_func=init_anim,
+            interval=20,
+            blit=False,
+            repeat=False
+        )
+        # STOP initially (so Start button works)
+        if hasattr(self, "ani") and self.ani is not None:
+            try:
+                self.ani.event_source.stop()
+            except:
+                pass
+
+                # ===============================
+        # 🎮 ANIMATION CONTROLS
+        # ===============================
+
+        def start_animation():
+            if hasattr(self, "ani"):
+                self.ani.event_source.start()
+
+        def pause_animation():
+            if hasattr(self, "ani"):
+                self.ani.event_source.stop()
+
+        
         # ================= BUTTON FRAME =================
         btn_frame = tk.Frame(self.win)
         btn_frame.pack(pady=20)
@@ -450,13 +628,58 @@ class FinalPlotScreen:
             btn_frame,
             "⬅ Back",
             self.win.destroy
-        ).grid(row=0, column=0, padx=20)
+        ).grid(row=0, column=0, padx=15)
+
+        styled_button(
+            btn_frame,
+            "▶ Start",
+            start_animation
+        ).grid(row=0, column=1, padx=15)
+
+        styled_button(
+            btn_frame,
+            "⏸ Pause",
+            pause_animation
+        ).grid(row=0, column=2, padx=15)
 
         styled_button(
             btn_frame,
             "Next ➜",
             self.open_gps_dashboard
-        ).grid(row=0, column=1, padx=20)
+        ).grid(row=0, column=3, padx=15)
+
+        styled_button(
+            btn_frame,
+            "Export JSON",
+            self.export_json_info
+        ).grid(row=0, column=4, padx=15)
+
+    def _line_polygon_intersections(self, polygon, axis_value, direction):
+        hits = []
+        n = len(polygon)
+        for i in range(n):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n]
+            if direction == "lengthwise":
+                if abs(y2 - y1) < 1e-9:
+                    continue
+                if axis_value >= min(y1, y2) and axis_value < max(y1, y2):
+                    t = (axis_value - y1) / (y2 - y1)
+                    hits.append(x1 + t * (x2 - x1))
+            else:
+                if abs(x2 - x1) < 1e-9:
+                    continue
+                if axis_value >= min(x1, x2) and axis_value < max(x1, x2):
+                    t = (axis_value - x1) / (x2 - x1)
+                    hits.append(y1 + t * (y2 - y1))
+        return sorted(hits)
+
+    def export_json_info(self):
+        json_path = os.path.join(DATA_DIR, "waypoints.json")
+        if os.path.exists(json_path):
+            messagebox.showinfo("Export", f"JSON export available at:\n{json_path}")
+        else:
+            messagebox.showwarning("Export", "JSON file not found. Generate path first.")
 
     def open_gps_dashboard(self):
         GPSWaypointDashboard(self.win)
