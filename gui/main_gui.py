@@ -6,10 +6,29 @@ import sys
 import csv
 import math
 import json
+from matplotlib import container
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from sklearn import metrics
 
+
+
+from PIL import Image, ImageTk
+
+def set_bg(window, path):
+    try:
+        img = Image.open(path)
+        img = img.resize((window.winfo_screenwidth(), window.winfo_screenheight()))
+        bg = ImageTk.PhotoImage(img)
+
+        label = tk.Label(window, image=bg)
+        label.image = bg
+        label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        return label
+    except:
+        return None
 # ==================================================
 # PATHS
 # ==================================================
@@ -30,18 +49,39 @@ FONT_LABEL = ("Arial", 14)
 FONT_BUTTON = ("Arial", 14, "bold")
 
 
+def gps_to_local_normalized(points):
+    if not points:
+        return []
+    lat0, lon0 = points[0]
+    local = []
+    for lat, lon in points:
+        avg_lat = math.radians((lat0 + lat) / 2.0)
+        x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
+        y = (lat - lat0) * 111320.0
+        local.append((x, y))
+    min_x = min(p[0] for p in local)
+    min_y = min(p[1] for p in local)
+    return [(x - min_x, y - min_y) for x, y in local]
+
+
 def styled_button(parent, text, command):
-    return tk.Button(parent,
-                     text=text,
-                     font=FONT_BUTTON,
-                     bg=BTN_COLOR,
-                     fg="white",
-                     activebackground=BTN_HOVER,
-                     activeforeground="white",
-                     width=18,
-                     height=2,
-                     bd=0,
-                     command=command)
+    btn = tk.Button(parent,
+                    text=text,
+                    font=("Segoe UI", 13, "bold"),
+                    bg="#1b5e20",
+                    fg="white",
+                    activebackground="#2e7d32",
+                    activeforeground="white",
+                    bd=0,
+                    padx=20,
+                    pady=10,
+                    cursor="hand2",
+                    command=command)
+
+    btn.bind("<Enter>", lambda e: btn.config(bg="#2e7d32"))
+    btn.bind("<Leave>", lambda e: btn.config(bg="#1b5e20"))
+
+    return btn
 
 # ==================================================
 # DASHBOARD 1 : FIELD BOUNDARY
@@ -53,14 +93,38 @@ class FieldBoundaryGUI:
         root.title("Autonomous Tractor Path Planning")
         root.state("zoomed")
         root.configure(bg=BG_COLOR)
+        bg_path = os.path.join(BASE_DIR, "assets", "field.jpg")
+        set_bg(root, bg_path)
 
+        # ===== NEW PROFESSIONAL HEADER =====
+        header = tk.Frame(root, bg="#0d1b2a", height=70)
+        header.pack(fill="x")
+
+        tk.Label(header,
+            text="🚜 Autonomous Tractor Path Planning System",
+            font=("Segoe UI", 20, "bold"),
+            fg="white",
+            bg="#0d1b2a").pack(pady=(10, 0))
+
+        tk.Label(header,
+            text="RTK Navigation | ±2 cm Accuracy | Sensor Fusion Enabled",
+            font=("Segoe UI", 10),
+            fg="#90ee90",
+            bg="#0d1b2a").pack(pady=(0, 10))
+        
         tk.Label(root,
-                 text="🌍 Field Shape + GPS Input",
-                 font=FONT_HEADER,
-                 fg=HEADER_COLOR,
-                 bg=BG_COLOR).pack(pady=30)
+         text="Parallel Row Path Planning | U-Turn Optimization | GNSS + AHRS Fusion",
+         font=("Segoe UI", 10),
+         bg=BG_COLOR,
+         fg="#444").pack(pady=5)
 
-        frame = tk.Frame(root, bg=BG_COLOR)
+        frame = tk.Frame(root, bg="#ffffff")
+        frame.pack(pady=40, padx=60)
+
+        frame.config(
+            highlightbackground="#cccccc",
+            highlightthickness=1
+        )
         frame.pack(pady=20)
 
         tk.Label(frame, text="Field Shape", font=FONT_LABEL, bg=BG_COLOR).grid(row=0, column=0, pady=8)
@@ -81,10 +145,9 @@ class FieldBoundaryGUI:
 
     def required_points(self):
         shape_counts = {
-            "triangle": 3,
+            
             "rectangle": 4,
-            "square": 4,
-            "trapezium": 4,
+            
             "rhombus": 4,
         }
         return shape_counts.get(self.shape_var.get(), 4)
@@ -190,14 +253,7 @@ class BoundaryScreen:
                       lambda: BaselineGUI(parent, L, W, self.shape, self.gps_points)).grid(row=0, column=1, padx=20)
 
     def _gps_to_local(self, points):
-        lat0, lon0 = points[0]
-        local = []
-        for lat, lon in points:
-            avg_lat = math.radians((lat0 + lat) / 2.0)
-            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
-            y = (lat - lat0) * 111320.0
-            local.append((x, y))
-        return local
+        return gps_to_local_normalized(points)
 
 # ==================================================
 # DASHBOARD 2 : BASELINE CONFIG
@@ -321,14 +377,7 @@ class BaselinePreviewGUI:
                       lambda: RowSpacingGUI(root, L, W, direction, base_len, diag, self.shape, self.gps_points)).grid(row=0, column=1, padx=20)
 
     def _gps_to_local(self, points):
-        lat0, lon0 = points[0]
-        local = []
-        for lat, lon in points:
-            avg_lat = math.radians((lat0 + lat) / 2.0)
-            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
-            y = (lat - lat0) * 111320.0
-            local.append((x, y))
-        return local
+        return gps_to_local_normalized(points)
 
 # ==================================================
 # DASHBOARD 3 : ROW SPACING
@@ -383,9 +432,7 @@ class RowSpacingGUI:
             str(self.L), str(self.W),
             str(ROW), self.direction,
             str(self.base_len), str(self.diag),
-            "--shape", self.shape,
-            "--turn-radius", str(turn_radius),
-            "--export-json",
+            
         ]
         if self.shape != "rectangle" and self.gps_points:
             local_points = self._gps_to_local(self.gps_points)
@@ -396,17 +443,13 @@ class RowSpacingGUI:
         FinalPlotScreen(self.root, self.L, self.W, ROW, self.direction, self.base_len, self.diag, self.shape, self.gps_points)
 
     def _gps_to_local(self, points):
-        lat0, lon0 = points[0]
-        local = []
-        for lat, lon in points:
-            avg_lat = math.radians((lat0 + lat) / 2.0)
-            x = (lon - lon0) * 111320.0 * math.cos(avg_lat)
-            y = (lat - lat0) * 111320.0
-            local.append((x, y))
-        return local
+        return gps_to_local_normalized(points)
 
 # ==================================================
 # FINAL SCREEN
+# ==================================================
+# ==================================================
+# FINAL SCREEN (FIXED)
 # ==================================================
 class FinalPlotScreen:
     def __init__(self, parent, L, W, ROW, direction, base_len, diag, shape="rectangle", gps_points=None):
@@ -420,7 +463,10 @@ class FinalPlotScreen:
         self.diag = diag
         self.shape = shape
         self.gps_points = gps_points or []
+
         self.win = tk.Toplevel(parent)
+        bg_path = os.path.join(BASE_DIR, "assets", "tractor.jpg")
+        set_bg(self.win, bg_path)
         self.win.title("Complete Field Path")
         self.win.state("zoomed")
 
@@ -428,17 +474,113 @@ class FinalPlotScreen:
 
         waypoints = []
         metadata = {}
+
         with open(csv_path) as f:
             reader = csv.reader(f)
             for row in reader:
                 if row and row[0].startswith("#") and len(row) >= 7:
                     try:
                         metadata = json.loads(row[6])
-                    except Exception:
+                    except:
                         metadata = {}
+
                 if not row or row[0].startswith("#") or row[0] == "x":
                     continue
-                waypoints.append({'x': float(row[0]), 'y': float(row[1]), 'type': int(row[2])})
+
+                waypoints.append({
+                    'x': float(row[0]),
+                    'y': float(row[1]),
+                    'type': int(row[2])
+                })
+
+        # ================= PERFORMANCE =================
+        SLIP_FACTOR = 1.25
+        ROW_FUEL_RATE = 0.0006
+        TURN_FUEL_RATE = 0.0008
+
+        V_ROW = 1.4
+        V_TURN = 0.7
+
+        D_row = D_turn = 0
+        fuel_total = fuel_row = fuel_turn = 0
+
+        for i in range(1, len(waypoints)):
+            x1, y1, t1 = waypoints[i-1]['x'], waypoints[i-1]['y'], waypoints[i-1]['type']
+            x2, y2, t2 = waypoints[i]['x'], waypoints[i]['y'], waypoints[i]['type']
+
+            dist = math.hypot(x2 - x1, y2 - y1)
+
+            if t2 == 1:
+                dist *= SLIP_FACTOR
+
+            if t2 == 0:
+                D_row += dist
+                fuel = dist * ROW_FUEL_RATE
+                fuel_row += fuel
+            else:
+                D_turn += dist
+                fuel = dist * TURN_FUEL_RATE
+                fuel_turn += fuel
+
+            fuel_total += fuel
+
+        T_row = D_row / V_ROW
+        T_turn = D_turn / V_TURN
+        T_total = T_row + T_turn
+        D_total = D_row + D_turn
+        V_eff = D_total / T_total
+        efficiency = T_row / T_total
+
+        area = self.L * self.W
+        EFC_ha = ((area / T_total) * 3600) / 10000
+
+        # ================= DISPLAY =================
+    
+
+
+        metrics = {
+            "D_total": D_total,
+            "D_row": D_row,
+            "D_turn": D_turn,
+            "fuel_total": fuel_total,
+            "fuel_row": fuel_row,
+            "fuel_turn": fuel_turn,
+            "T_total": T_total,
+            "efficiency": efficiency,
+            "EFC_ha": EFC_ha
+        }
+
+        self.create_dashboard(self.win, metrics)
+
+        # ================= PLOT =================
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        polygon = metadata.get("polygon")
+
+        if polygon:
+            bx = [p[0] for p in polygon] + [polygon[0][0]]
+            by = [p[1] for p in polygon] + [polygon[0][1]]
+        else:
+            bx = [0, L, L, 0, 0]
+            by = [0, 0, W, W, 0]
+
+        ax.plot(bx, by, "k--")
+
+        xs = [wp['x'] for wp in waypoints]
+        ys = [wp['y'] for wp in waypoints]
+
+        ax.plot(xs, ys, color="blue", linewidth=2)
+
+        ax.scatter(xs[0], ys[0], color="green", s=100, label="Start")
+        ax.scatter(xs[-1], ys[-1], color="red", s=100, label="End")
+
+        ax.set_title("Tractor Path")
+        ax.grid(True)
+        ax.legend()
+
+        canvas = FigureCanvasTkAgg(fig, self.win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Get L, W, direction, diag, base_len from self
         L, W, direction = self.L, self.W, self.direction
@@ -447,7 +589,7 @@ class FinalPlotScreen:
         base_len = self.base_len
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        
+    
         # 1. Plot Field Boundary
         polygon = metadata.get("polygon")
         if polygon:
@@ -459,16 +601,16 @@ class FinalPlotScreen:
             by = [0, 0, W, W, 0]
             ax.plot(bx, by, "k--", linewidth=2, label="Field Boundary")
 
-        # Plot Diagonal and Baseline for visual reference
+    # Plot Diagonal and Baseline for visual reference
         if direction == "lengthwise":
             ax.plot([0, diag], [0, diag], color="blue", linestyle=":", linewidth=2, label="Diagonal")
             ax.plot([diag, diag + base_len], [diag, diag], color="red", linestyle="-", linewidth=2.5, label="Baseline")
         else:
             ax.plot([0, diag], [0, diag], color="blue", linestyle=":", linewidth=2, label="Diagonal")
             ax.plot([diag, diag], [diag, diag + base_len], color="red", linestyle="-", linewidth=2.5, label="Baseline")
-        
-        # 2. Plot Fixed Crop Rows (Thin grey lines)
-        # Re-calculate row positions for display
+    
+    # 2. Plot Fixed Crop Rows (Thin grey lines)
+    # Re-calculate row positions for display
         if direction == "lengthwise":
             available_width = W - diag
             rows_count = max(2, int(math.floor(available_width / ROW)) + 1)
@@ -478,21 +620,21 @@ class FinalPlotScreen:
                 if polygon:
                     xs_intersections = self._line_polygon_intersections(polygon, pos, "lengthwise")
                     if len(xs_intersections) >= 2:
-                        ax.plot([xs_intersections[0], xs_intersections[-1]], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                       ax.plot([xs_intersections[0], xs_intersections[-1]], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                    else:
+                       ax.plot([0, L], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
                 else:
-                    ax.plot([0, L], [pos, pos], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
-        else:
-            available_length = L - diag
-            rows_count = max(2, int(math.floor(available_length / ROW)) + 1)
-            row_positions = [diag + i * ROW for i in range(rows_count) if (diag + i * ROW) <= L]
-            for idx, pos in enumerate(row_positions):
-                label = "Planned Crop Rows" if idx == 0 else ""
-                if polygon:
-                    ys_intersections = self._line_polygon_intersections(polygon, pos, "widthwise")
-                    if len(ys_intersections) >= 2:
-                        ax.plot([pos, pos], [ys_intersections[0], ys_intersections[-1]], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
-                else:
-                    ax.plot([pos, pos], [0, W],color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                    available_length = L - diag
+                    rows_count = max(2, int(math.floor(available_length / ROW)) + 1)
+                    row_positions = [diag + i * ROW for i in range(rows_count) if (diag + i * ROW) <= L]
+                    for idx, pos in enumerate(row_positions):
+                        label = "Planned Crop Rows" if idx == 0 else ""
+                        if polygon:
+                           ys_intersections = self._line_polygon_intersections(polygon, pos, "widthwise")
+                        if len(ys_intersections) >= 2:
+                           ax.plot([pos, pos], [ys_intersections[0], ys_intersections[-1]], color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
+                        else:
+                           ax.plot([pos, pos], [0, W],color="grey", linestyle="--", linewidth=0.8, alpha=0.3, label=label)
 
         # 3. Plot Tractor Travel Path (Differentiated by type)
         # We need to split waypoints into segments for coloring
@@ -620,6 +762,15 @@ class FinalPlotScreen:
                 self.ani.event_source.stop()
 
         
+        # ==================================================
+        # 📊 DISPLAY ANALYSIS RESULTS
+        # ==================================================
+
+        
+
+
+
+
         # ================= BUTTON FRAME =================
         btn_frame = tk.Frame(self.win)
         btn_frame.pack(pady=20)
@@ -673,6 +824,54 @@ class FinalPlotScreen:
                     t = (axis_value - x1) / (x2 - x1)
                     hits.append(y1 + t * (y2 - y1))
         return sorted(hits)
+    
+
+    def create_dashboard(self, parent, metrics):
+
+        card_bg = "#ffffff"
+        border_color = "#d0d0d0"
+        container = tk.Frame(parent, bg=BG_COLOR)
+        container.pack(fill="x", padx=20, pady=10)
+
+        def create_card(parent, title, value, color) -> None:
+            frame = tk.Frame(parent, bg="#ffffff", bd=0)
+            frame.pack(side="left", padx=15, pady=10, expand=True, fill="both")
+
+            frame.config(highlightbackground="#dddddd", highlightthickness=1)
+
+            tk.Label(frame, text=title,
+                font=("Arial", 11, "bold"),
+                bg=card_bg,
+                fg="#555").pack(anchor="w", padx=10, pady=(8, 2))
+
+            tk.Label(frame, text=value,
+                font=("Arial", 16, "bold"),
+                bg=card_bg,
+                fg=color).pack(anchor="w", padx=10, pady=(0, 10))
+
+    # ROW 1
+        row1 = tk.Frame(container, bg=BG_COLOR)
+        row1.pack(fill="x")
+
+        create_card(row1, "Total Distance", f"{metrics['D_total']:.2f} m", "#1f77b4")
+        create_card(row1, "Row Distance", f"{metrics['D_row']:.2f} m", "#2ca02c")
+        create_card(row1, "Turn Distance", f"{metrics['D_turn']:.2f} m", "#d62728")
+
+    # ROW 2
+        row2 = tk.Frame(container, bg=BG_COLOR)
+        row2.pack(fill="x")
+
+        create_card(row2, "Total Fuel", f"{metrics['fuel_total']:.3f} L", "#9467bd")
+        create_card(row2, "Row Fuel", f"{metrics['fuel_row']:.3f} L", "#17becf")
+        create_card(row2, "Turn Fuel", f"{metrics['fuel_turn']:.3f} L", "#ff7f0e")
+
+    # ROW 3
+        row3 = tk.Frame(container, bg=BG_COLOR)
+        row3.pack(fill="x")
+
+        create_card(row3, "Total Time", f"{metrics['T_total']:.2f} sec", "#8c564b")
+        create_card(row3, "Efficiency", f"{metrics['efficiency']*100:.2f} %", "#2ca02c")
+        create_card(row3, "Field Capacity", f"{metrics['EFC_ha']:.2f} ha/hr", "#bcbd22")
 
     def export_json_info(self):
         json_path = os.path.join(DATA_DIR, "waypoints.json")
